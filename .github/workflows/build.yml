@@ -11,57 +11,60 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Build Tools
+      - name: Install Tools
         run: |
           sudo apt update
-          sudo apt install -y live-build squashfs-tools xorriso debootstrap
+          sudo apt install -y debootstrap squashfs-tools xorriso mtools fusion-icon
 
-      - name: Setup Configuration
+      - name: Build SakuOS
         run: |
-          # Inisialisasi tanpa pindah folder
-          lb config --architecture amd64 \
-                    --distribution bookworm \
-                    --binary-images iso-hybrid \
-                    --debian-installer live \
-                    --archive-areas "main contrib non-free non-free-firmware" \
-                    --memtest none
+          # Buat folder kerja
+          mkdir -p chroot
+          
+          # 1. Bootstrap sistem dasar Debian
+          sudo debootstrap --arch=amd64 bookworm chroot http://deb.debian.org/debian/
 
-          # Paket minimal tapi lengkap buat XFCE
-          echo "task-xfce-desktop lightdm network-manager sudo" > config/package-lists/desktop.list.chroot
+          # 2. Pasang XFCE dan Desktop
+          sudo chroot chroot apt update
+          sudo chroot chroot apt install -y --no-install-recommends \
+              linux-image-amd64 live-boot xserver-xorg-core \
+              xserver-xorg xinit xfce4 xfce4-goodies \
+              lightdm sudo network-manager firefox-esr
 
-          # 1. Pastikan folder skel ada (untuk settingan user)
-          mkdir -p config/includes.chroot/etc/skel/
-
-          # 2. Ekstrak desain ke folder SKEL (agar otomatis ke user baru)
+          # 3. Masukkan Desain All-In dari Termux
+          sudo mkdir -p chroot/etc/skel/
           if [ -f sakuos_all_in.tar.gz ]; then
-            sudo tar -xvzf sakuos_all_in.tar.gz -C config/includes.chroot/etc/skel/ || echo "Warning: Extraction issue"
+            sudo tar -xvzf sakuos_all_in.tar.gz -C chroot/etc/skel/ --overwrite || true
           fi
 
-          # 3. Script Hook User
-          mkdir -p config/hooks/live
-          cat <<EOF > config/hooks/live/01-setup-user.chroot
-          #!/bin/sh
-          useradd -m -s /bin/bash pelajar || true
-          echo "pelajar:pelajar" | chpasswd
-          usermod -aG sudo pelajar || true
-          # Copy file dari skel ke home pelajar
-          cp -r /etc/skel/. /home/pelajar/
-          chown -R pelajar:pelajar /home/pelajar/
-          EOF
-          chmod +x config/hooks/live/01-setup-user.chroot
+          # 4. Buat User Pelajar
+          sudo chroot chroot useradd -m -s /bin/bash pelajar
+          sudo chroot chroot sh -c "echo 'pelajar:pelajar' | chpasswd"
+          sudo chroot chroot usermod -aG sudo pelajar
+          sudo cp -r chroot/etc/skel/. chroot/home/pelajar/
+          sudo chroot chroot chown -R pelajar:pelajar /home/pelajar/
 
-      - name: Build ISO
-        run: |
-          # Gunakan perintah build langsung di root
-          sudo lb build
+          # 5. Packing jadi SquashFS
+          mkdir -p image/live
+          sudo mksquashfs chroot image/live/filesystem.squashfs -comp xz
 
+          # 6. Bikin ISO (Mode Brute Force)
+          # Ambil kernel dan initrd
+          cp chroot/boot/vmlinuz-* image/live/vmlinuz
+          cp chroot/boot/initrd.img-* image/live/initrd
+          
+          # Bikin ISO sederhana
+          xorrisofs -as mkisofs -iso-level 3 -o SakuOS-Final.iso \
+            -full-iso9660-filenames -volid "SakuOS" \
+            -eltorito-boot live/vmlinuz -no-emul-boot -boot-load-size 4 -boot-info-table \
+            image/
+          
       - name: Upload to Release
-        if: success()
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: SakuOS Release v1.0.${{ github.run_number }}
-          files: "*.iso"
+          tag_name: v2.0.${{ github.run_number }}
+          name: SakuOS Release v2.0.${{ github.run_number }}
+          files: SakuOS-Final.iso
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
