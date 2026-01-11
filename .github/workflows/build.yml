@@ -9,38 +9,58 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Build Tools
+      - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y live-build xorriso squashfs-tools
+          sudo apt install -y live-build squashfs-tools xorriso debootstrap
 
-      - name: Setup Live Build
+      - name: Setup and Build
         run: |
-          mkdir build && cd build
-          # Setup minimal agar peluang gagal kecil
-          lb config --architecture amd64 --distribution bookworm --binary-images iso-hybrid --debian-installer live --memtest none
+          mkdir -p build && cd build
           
-          # Membersihkan daftar aplikasi (Hapus paket khusus Android/Termux)
-          grep -vE "termux|proot|android" ../apps.txt > config/package-lists/myapps.list.chroot || true
-          
-          # Tambahkan paket wajib agar GUI jalan
-          echo "xfce4 xfce4-goodies lightdm xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all" >> config/package-lists/myapps.list.chroot
+          # Initialize configuration
+          lb config --architecture amd64 \
+                    --distribution bookworm \
+                    --binary-images iso-hybrid \
+                    --debian-installer live \
+                    --archive-areas "main contrib non-free non-free-firmware" \
+                    --memtest none \
+                    --apt-indices false
 
-          # Ekstrak desain SakuOS
+          # 1. Tambahkan paket esensial (Pasti ada di PC)
+          echo "task-xfce-desktop lightdm network-manager sudo xterm" > config/package-lists/desktop.list.chroot
+
+          # 2. Ekstrak desain SakuOS lu
+          # Kita gunakan try-catch agar jika ada file path aneh tidak langsung stop
           mkdir -p config/includes.chroot/
-          # Menggunakan sudo dan --overwrite agar tidak error saat ekstrak ke root
-          sudo tar -xvzf ../sakuos_all_in.tar.gz -C config/includes.chroot/ --overwrite || echo "Ada file yang dilewati"
+          if [ -f ../sakuos_all_in.tar.gz ]; then
+            sudo tar -xvzf ../sakuos_all_in.tar.gz -C config/includes.chroot/ || echo "Warning: Some files failed to extract"
+          fi
 
-      - name: Build ISO
-        run: |
-          cd build
-          # Pakai sudo lb build agar punya ijin penuh
-          sudo lb build
+          # 3. Fix User Pelajar (Biar gak bentrok)
+          mkdir -p config/hooks/live
+          cat <<EOF > config/hooks/live/01-setup-user.chroot
+          #!/bin/sh
+          useradd -m -s /bin/bash pelajar || true
+          echo "pelajar:pelajar" | chpasswd
+          usermod -aG sudo pelajar || true
+          EOF
+          chmod +x config/hooks/live/01-setup-user.chroot
 
-      - name: Upload Hasil
-        if: always() # Tetap upload meskipun ada error dikit agar kita bisa cek log
+          # 4. MULAI RAKIT DENGAN LOG
+          sudo lb build 2>&1 | tee build.log
+
+      - name: Upload ISO
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SakuOS-Result
+          name: SakuOS-ISO
           path: build/*.iso
+
+      - name: Upload Error Log (Kalau Gagal)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Build-Log-Gagal
+          path: build/build.log
           
