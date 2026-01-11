@@ -1,0 +1,49 @@
+name: Build SakuOS ISO
+on:
+  workflow_dispatch: # Supaya lu bisa klik tombol "Run" manual
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Tools
+        run: |
+        
+          sudo apt update
+          sudo apt install -y live-build
+
+      - name: Setup Live Build
+        run: |
+        
+          mkdir build && cd build
+          # Konfigurasi dasar Debian (64-bit)
+        
+          lb config --architecture amd64 --distribution bookworm --binary-images iso-hybrid --debian-installer live
+          
+          # 1. Masukkan list aplikasi dari file apps.txt
+        
+          cp ../apps.txt config/package-lists/myapps.list.chroot
+          
+          #2. Ekstrak 'Jiwa' SakuOS ke dalam folder sistem ISO
+
+    
+          mkdir -p config/includes.chroot/
+          sudo tar -xvzf ../sakuos_all_in.tar.gz -C config/includes.chroot/
+          
+          # 3. Setup agar otomatis login sebagai user 'pelajar'
+          mkdir -p config/hooks/live
+          echo 'lb_config --bootappend-live "boot=live components username=pelajar hostname=SakuOS"' > config/hooks/live/01-user-setup.chroot
+
+      - name: Build ISO
+        run: |
+          cd build
+          sudo lb build
+
+      - name: Upload ISO Ke GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: SakuOS-Installer-ISO
+          path: build/*.iso
