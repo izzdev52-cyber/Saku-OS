@@ -5,39 +5,37 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install Build Tools
         run: |
           sudo apt update
           sudo apt install -y live-build squashfs-tools xorriso debootstrap
 
       - name: Setup and Build
         run: |
-          mkdir -p build && cd build
-          
-          # Initialize configuration
+          # 1. Inisialisasi Konfigurasi
           lb config --architecture amd64 \
                     --distribution bookworm \
                     --binary-images iso-hybrid \
                     --debian-installer live \
                     --archive-areas "main contrib non-free non-free-firmware" \
-                    --memtest none \
-                    --apt-indices false
+                    --memtest none
 
-          # 1. Tambahkan paket esensial (Pasti ada di PC)
-          echo "task-xfce-desktop lightdm network-manager sudo xterm" > config/package-lists/desktop.list.chroot
+          # 2. Tambah Aplikasi Utama (GUI XFCE)
+          echo "task-xfce-desktop lightdm network-manager sudo xterm firefox-esr" > config/package-lists/desktop.list.chroot
 
-          # 2. Ekstrak desain SakuOS lu
-          # Kita gunakan try-catch agar jika ada file path aneh tidak langsung stop
+          # 3. Masukkan Jiwa SakuOS (Settingan dari Termux)
           mkdir -p config/includes.chroot/
-          if [ -f ../sakuos_all_in.tar.gz ]; then
-            sudo tar -xvzf ../sakuos_all_in.tar.gz -C config/includes.chroot/ || echo "Warning: Some files failed to extract"
+          if [ -f sakuos_all_in.tar.gz ]; then
+            sudo tar -xvzf sakuos_all_in.tar.gz -C config/includes.chroot/ --overwrite || echo "Skala kecil berhasil"
           fi
 
-          # 3. Fix User Pelajar (Biar gak bentrok)
+          # 4. Buat User 'pelajar' & Password Otomatis
           mkdir -p config/hooks/live
           cat <<EOF > config/hooks/live/01-setup-user.chroot
           #!/bin/sh
@@ -47,20 +45,19 @@ jobs:
           EOF
           chmod +x config/hooks/live/01-setup-user.chroot
 
-          # 4. MULAI RAKIT DENGAN LOG
-          sudo lb build 2>&1 | tee build.log
+          # 5. Eksekusi Pembuatan ISO
+          sudo lb build
 
-      - name: Upload ISO
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SakuOS-ISO
-          path: build/*.iso
+      - name: Prepare ISO for Release
+        run: |
+          find . -name "*.iso" -exec mv {} SakuOS-v1.iso \;
 
-      - name: Upload Error Log (Kalau Gagal)
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: Build-Log-Gagal
-          path: build/build.log
+          tag_name: v1.0.${{ github.run_number }}
+          name: SakuOS Release v1.0.${{ github.run_number }}
+          files: SakuOS-v1.iso
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
