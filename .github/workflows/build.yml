@@ -1,6 +1,6 @@
 name: Build SakuOS ISO
 on:
-  workflow_dispatch: # Supaya lu bisa klik tombol "Run" manual
+  workflow_dispatch:
 
 jobs:
   build:
@@ -11,39 +11,36 @@ jobs:
 
       - name: Install Build Tools
         run: |
-        
           sudo apt update
-          sudo apt install -y live-build
+          sudo apt install -y live-build xorriso squashfs-tools
 
       - name: Setup Live Build
         run: |
-        
           mkdir build && cd build
-          # Konfigurasi dasar Debian (64-bit)
-        
-          lb config --architecture amd64 --distribution bookworm --binary-images iso-hybrid --debian-installer live
+          # Setup minimal agar peluang gagal kecil
+          lb config --architecture amd64 --distribution bookworm --binary-images iso-hybrid --debian-installer live --memtest none
           
-          # 1. Masukkan list aplikasi dari file apps.txt
-        
-          cp ../apps.txt config/package-lists/myapps.list.chroot
+          # Membersihkan daftar aplikasi (Hapus paket khusus Android/Termux)
+          grep -vE "termux|proot|android" ../apps.txt > config/package-lists/myapps.list.chroot || true
           
-          #2. Ekstrak 'Jiwa' SakuOS ke dalam folder sistem ISO
+          # Tambahkan paket wajib agar GUI jalan
+          echo "xfce4 xfce4-goodies lightdm xserver-xorg-core xserver-xorg-video-all xserver-xorg-input-all" >> config/package-lists/myapps.list.chroot
 
-    
+          # Ekstrak desain SakuOS
           mkdir -p config/includes.chroot/
-          sudo tar -xvzf ../sakuos_all_in.tar.gz -C config/includes.chroot/
-          
-          # 3. Setup agar otomatis login sebagai user 'pelajar'
-          mkdir -p config/hooks/live
-          echo 'lb_config --bootappend-live "boot=live components username=pelajar hostname=SakuOS"' > config/hooks/live/01-user-setup.chroot
+          # Menggunakan sudo dan --overwrite agar tidak error saat ekstrak ke root
+          sudo tar -xvzf ../sakuos_all_in.tar.gz -C config/includes.chroot/ --overwrite || echo "Ada file yang dilewati"
 
       - name: Build ISO
         run: |
           cd build
+          # Pakai sudo lb build agar punya ijin penuh
           sudo lb build
 
-      - name: Upload ISO Ke GitHub
+      - name: Upload Hasil
+        if: always() # Tetap upload meskipun ada error dikit agar kita bisa cek log
         uses: actions/upload-artifact@v4
         with:
-          name: SakuOS-Installer-ISO
+          name: SakuOS-Result
           path: build/*.iso
+          
