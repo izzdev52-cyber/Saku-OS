@@ -16,9 +16,9 @@ jobs:
           sudo apt update
           sudo apt install -y live-build squashfs-tools xorriso debootstrap
 
-      - name: Setup and Build
+      - name: Setup Configuration
         run: |
-          # 1. Inisialisasi Konfigurasi
+          # Inisialisasi tanpa pindah folder
           lb config --architecture amd64 \
                     --distribution bookworm \
                     --binary-images iso-hybrid \
@@ -26,38 +26,42 @@ jobs:
                     --archive-areas "main contrib non-free non-free-firmware" \
                     --memtest none
 
-          # 2. Tambah Aplikasi Utama (GUI XFCE)
-          echo "task-xfce-desktop lightdm network-manager sudo xterm firefox-esr" > config/package-lists/desktop.list.chroot
+          # Paket minimal tapi lengkap buat XFCE
+          echo "task-xfce-desktop lightdm network-manager sudo" > config/package-lists/desktop.list.chroot
 
-          # 3. Masukkan Jiwa SakuOS (Settingan dari Termux)
-          mkdir -p config/includes.chroot/
+          # 1. Pastikan folder skel ada (untuk settingan user)
+          mkdir -p config/includes.chroot/etc/skel/
+
+          # 2. Ekstrak desain ke folder SKEL (agar otomatis ke user baru)
           if [ -f sakuos_all_in.tar.gz ]; then
-            sudo tar -xvzf sakuos_all_in.tar.gz -C config/includes.chroot/ --overwrite || echo "Skala kecil berhasil"
+            sudo tar -xvzf sakuos_all_in.tar.gz -C config/includes.chroot/etc/skel/ || echo "Warning: Extraction issue"
           fi
 
-          # 4. Buat User 'pelajar' & Password Otomatis
+          # 3. Script Hook User
           mkdir -p config/hooks/live
           cat <<EOF > config/hooks/live/01-setup-user.chroot
           #!/bin/sh
           useradd -m -s /bin/bash pelajar || true
           echo "pelajar:pelajar" | chpasswd
           usermod -aG sudo pelajar || true
+          # Copy file dari skel ke home pelajar
+          cp -r /etc/skel/. /home/pelajar/
+          chown -R pelajar:pelajar /home/pelajar/
           EOF
           chmod +x config/hooks/live/01-setup-user.chroot
 
-          # 5. Eksekusi Pembuatan ISO
+      - name: Build ISO
+        run: |
+          # Gunakan perintah build langsung di root
           sudo lb build
 
-      - name: Prepare ISO for Release
-        run: |
-          find . -name "*.iso" -exec mv {} SakuOS-v1.iso \;
-
       - name: Upload to Release
+        if: success()
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: SakuOS Release v1.0.${{ github.run_number }}
-          files: SakuOS-v1.iso
+          files: "*.iso"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
